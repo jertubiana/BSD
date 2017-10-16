@@ -134,7 +134,7 @@ if ~isfield(O,'superResolution');
 end;
 
 if ~isfield(O,'slowOptimizer'); O.slowOptimizer = 0; end; % Set to 1 for a slow but more accurate deconvolution optimizer, usefull sometimes for SR.
-
+if ~isfield(O,'thresholdBeforeKernelInference'); O.thresholdBeforeKernelInference = 0; end; % Set to 1 to threshold the spikes before kernel inference. Useful when tauR is small or noise is large.
 
 %% Initialize the default values of some numerical parameters.
 
