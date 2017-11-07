@@ -167,4 +167,4 @@ Oalg = O;
 
 figure; plot(F); hold on; plot(C); plot(N); legend('Fluorescence','denoised Fluorescence','Spikes');
 
-display(pPhys);
+display(Pphys);
