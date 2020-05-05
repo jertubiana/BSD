@@ -34,7 +34,9 @@ function [N,C,Palg,Pphys,O]=BSD( Fluorescence , O , varargin)
 %         - O.slowOptimizer (def 0) slow but more accurate deconvolution optimizer, useful sometimes for SuperResolution.
 %         - O.conditioner (default: 1e-8). Conditioner for the hessian, useful sometines when using superResolution
 %         - O.thresholdBeforeKernelInference (default: 0). Whether or not to threshold the spikes before the kernel optimization. Useful when tauR is of same order as Delta t or if sigma is large.
-%        
+%         - O.tauRiseMin, O.tauRiseMax, O.tauDecayMin, O.tauDecayMax
+%         (default: None). User-provided boundaries for the kernel
+%         parameter inference. Ex: O.tauRiseMin = 0.05, O.tauRiseMax = 0.2.
 %
 %
 % - P (optional): A structure of already known generative parameters, that serve as initializers for adaptive BSD. 
@@ -162,6 +164,19 @@ if ~isfield(O,'conditioner');
     end;
 end;
 
+if ~isfield(O,'tauRiseMin');
+  O.tauRiseMin = 0;
+end;
+if ~isfield(O,'tauDecayMin');
+  O.tauDecayMin = 0;
+end;
+if ~isfield(O,'tauRiseMax');
+  O.tauRiseMax = inf;
+end;
+if ~isfield(O,'tauDecayMax');
+  O.tauDecayMax = inf;
+end;
+
 
 O.sTime = O.Time * O.superResolution;
 
@@ -221,14 +236,12 @@ for k = 1:O.nNeurons
        q = q+1;
        tmpBigLambda = repmat(lambda(k,:)',[O.Time,1]);
        tmpBigMu = repmat(mu(k,:)',[O.Time,1]);
-
        
        [tmpN,~,tmp_cost(q,1)]  = BSD_deconvolution(Fluorescence(:,k),tmpN,b(k)...
             ,gamma(k),delta(k),eta(k),tmpBigLambda,tmpBigMu,O.conditioner, O.slowOptimizer,O.superResolution, I,I1,M,d0,d1,d2);       % update inferred spike train based on estimated parameters
 
        [tmpC,tmp_cost(q,2),b(k),a(k),sigma(k),lambda(k,:),mu(k,:),threshold(k),gamma(k),delta(k),eta(k),tauRise(k),tauDecay(k)] ...
              = BSD_parameter_estimation(tmpN,Fluorescence(:,k),O,tauRise(k),tauDecay(k),b(k),a(k),sigma(k),threshold(k),lambda(k,:));    % update parameters based on previous iteration.         
-        
        if (O.early_stopping == 0) % If cost function does not vary, and early_stoppings =0.
            if (abs((tmp_cost(q,1)-tmp_cost(q-1,1))/tmp_cost(q,1))<O.tol_iter )
                conv =1;

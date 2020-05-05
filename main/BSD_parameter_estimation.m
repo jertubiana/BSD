@@ -18,12 +18,37 @@ function [C,cost,bNew,aNew,sigmaNew,lambdaNew,muNew,thresholdNew,gammaNew,deltaN
 
 %% Initialization.
 BSD_functions
+
+if isfield(O,'tauRiseMin');
+    tauRiseMin = O.tauRiseMin;
+else
+    tauRiseMin = 0;
+end;
+
+if isfield(O,'tauDecayMin');
+    tauDecayMin = O.tauDecayMin;
+else
+    tauDecayMin = 0;
+end;
+
+if isfield(O,'tauRiseMax');
+    tauRiseMax = O.tauRiseMax;
+else
+    tauRiseMax = inf;
+end;
+
+if isfield(O,'tauDecayMax');
+    tauDecayMax= O.tauDecayMax;
+else
+    tauDecayMax = inf;
+end;
+
    
 
 
 %% Refine the convolution kernel of the signal.
 if O.est_tauDecay || O.est_tauRise
-    nmax = round ( 10* (tauRise+tauDecay)/O.dt);
+    nmax = max(min(round ( 10* (tauRise+tauDecay)/O.dt), floor(O.Time * 0.75) ),5);
     sF2 = sum(Fluorescence.^2);
     sF = sum(Fluorescence);
     if O.thresholdBeforeKernelInference ==1;
@@ -66,10 +91,16 @@ if O.est_tauDecay || O.est_tauRise
         cost_function = @(params) BSD_fcost(params(1),params(2), params(3), sF, sF2,sN, BxN,FxN, NxN,N,lam,O.dt,O.Time,nmax);
     end;
     
-    options =  optimoptions(@fminunc,'display','off','Algorithm','quasi-newton');    
+%     options =  optimoptions(@fminunc,'display','off','Algorithm','quasi-newton');    
+    options = optimoptions(@fmincon, 'display','off');
     if (O.est_tauDecay) && (O.est_tauRise) && (O.est_b);
-         X0 = [tauRise,tauDecay,b];
-        [X,cost] = fminunc(cost_function,X0,options);
+        X0 = [tauRise,tauDecay,b];
+        A = zeros(1,3);
+        A(1,1) = 1;
+        A(1,2) = -1;
+        B = -O.dt/10;         
+        [X,cost,~] = fmincon(cost_function,X0,A,B,[],[],[tauRiseMin,tauDecayMin,-inf],[tauRiseMax,tauDecayMax,+inf],[],options);                 
+%         [X,cost] = fminunc(cost_function,X0,options);
         tauRiseNew = min(X(1:2));
         tauDecayNew = max(X(1:2));
         bNew = X(3);
@@ -111,6 +142,9 @@ if O.est_tauDecay || O.est_tauRise
     end;
     tauRiseNew = real(tauRiseNew); % just in case.
     tauDecayNew = real(tauDecayNew);
+%     tauRiseNew = max(min(tauRiseNew,O.tauRiseMax),O.tauRiseMin);
+%     tauDecayNew = max(min(tauDecayNew,O.tauDecayMax),O.tauDecayMin);
+
     % Update the discrete dynamics parameters
     deltaNew = deltaCoeff(tauRiseNew,tauDecayNew,O.dt/O.superResolution);
     gammaNew = gammaCoeff(tauRiseNew,tauDecayNew,O.dt/O.superResolution);
@@ -158,15 +192,19 @@ if O.est_a==1
     else
         bias = lambda./normKernelCoeff(tauRise,tauDecay,O.dt)^2;
     end;
-    aNew=mean(N(N>threshold)) + bias; % The + takes into account the bias due to L1 regularization, and also acts as a default minimal value of z1/sqrt(normKernelCoeff) for the signal to noise ratio.
+    if max(N)>threshold;
+        aNew=mean(N(N>threshold)) + bias; % The + takes into account the bias due to L1 regularization, and also acts as a default minimal value of z1/sqrt(normKernelCoeff) for the signal to noise ratio.
+    else
+        aNew = bias;
+    end;
 else
     aNew=a;
 end;
 
 
 if O.est_threshold==1
-%     thresholdNew=thresholdCoeff(tauRiseNew,tauDecayNew,O.dt,sigmaNew,O.z3) ; % Recompute threshold
-    thresholdNew = thresholdCoeff2(tauRiseNew,tauDecayNew,O.dt,sigmaNew,aNew,O.z1,O.z2,O.z3,O.u);
+     thresholdNew=thresholdCoeff(tauRiseNew,tauDecayNew,O.dt,sigmaNew,O.z3) ; % Recompute threshold
+%    thresholdNew = thresholdCoeff2(tauRiseNew,tauDecayNew,O.dt,sigmaNew,aNew,O.z1,O.z2,O.z3,O.u);
 else
     thresholdNew=threshold;
 end;

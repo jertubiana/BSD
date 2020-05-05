@@ -1,8 +1,9 @@
-function [N,C,pAlg,pPhys,O]=pBSD( Fluorescence , O , varargin)
-% Performs the Blind Sparse Deconvolution Algorithm on Fluorescence data (EACH NEURON IN PARALLEL).
+function [N,C,Palg,Pphys,O]=pBSD( Fluorescence , O , varargin)
+% Performs the Blind Sparse Deconvolution Algorithm on Fluorescence data (parallelized across neurons).
 % Solves the optimization problem N = argmin_{N' >=0} ( 0.5 * ||F - K * N' - b||^2 + lambda
 % * |N'|_1), where K is a double exponential convolution kernel and lambda
 % is a sparsity coefficient. More references in [....]
+% Usage: [N,C,Palg,Pphys,O] = BSD(Fluorescence,O [, P] )
 % Inputs:
 % - Fluorescence: A (T X Nneurons) or (Nneurons X T) matrix of DeltaF/F signals.
 % - O: A structure of mandatory inputs and optional algorithm options:
@@ -31,8 +32,8 @@ function [N,C,pAlg,pPhys,O]=pBSD( Fluorescence , O , varargin)
 %         - O.u (def 0.5). An adimensional number to evaluate the threshold coefficient, see article. Lower means less false negatives/ more false positive.
 %         - O.nStepsKernelInference (def 7). The maximum delay of the autocorrelation function, for initial evaluation of the convolution kernel. Increase for less variance; may lead to larger decay time than true.
 %         - O.slowOptimizer (def 0) slow but more accurate deconvolution optimizer, useful sometimes for SuperResolution.
-%         - O.conditioner (default: 1e-8). Conditioner for the hessian,
-%         when using superResolution
+%         - O.conditioner (default: 1e-8). Conditioner for the hessian, useful sometines when using superResolution
+%         - O.thresholdBeforeKernelInference (default: 0). Whether or not to threshold the spikes before the kernel optimization. Useful when tauR is of same order as Delta t or if sigma is large.
 %        
 %
 %
@@ -52,8 +53,8 @@ function [N,C,pAlg,pPhys,O]=pBSD( Fluorescence , O , varargin)
 % Outputs:
 % - N: the inferred spike train, of size (superResolution X T) * nNeurons or transpose (same format as the input data). N is not normalized by N; same scale as the original data.
 % - C: the inferred convolved spike train; C = K * N + b. C can be compared with the original fluorescence signal.
-% - pAlg: the list of all parameters  used by algorithm. Fields include: a,b,sigma,tauRise,tauDecay,lambda,threshold. Each field is a nNeurons x 1 vector.
-% - pPhy: the list of all physical parameters. Fields: tauRise,tauDecay,SNR=sigma/a,lambda,threshold.
+% - Palg: the list of all parameters  used by algorithm. Fields include: a,b,sigma,tauRise,tauDecay,lambda,threshold. Each field is a nNeurons x 1 vector.
+% - Pphy: the list of all physical parameters. Fields: tauRise,tauDecay,SNR=sigma/a,lambda,threshold.
 % - O: the options structure. Contains the algorithm parameters used, and the values of the cost function.
 % 
 % Workflow of the algorithm:
@@ -133,8 +134,10 @@ if ~isfield(O,'superResolution');
     O.superResolution =1;
 end;
 
-if ~isfield(O,'slowOptimizer'); O.slowOptimizer = 0; end; % Set to 1 for a slow but more accurate deconvolution optimizer, usefull sometimes for SR.
+if ~isfield(O,'slowOptimizer'); O.slowOptimizer = 0; end; % Set to 1 for a slow but more accurate deconvolution optimizer, useful sometimes for SR.
+
 if ~isfield(O,'thresholdBeforeKernelInference'); O.thresholdBeforeKernelInference = 0; end; % Set to 1 to threshold the spikes before kernel inference. Useful when tauR is small or noise is large.
+
 
 %% Initialize the default values of some numerical parameters.
 
@@ -157,6 +160,19 @@ if ~isfield(O,'conditioner');
     else
         O.conditioner = 0;
     end;
+end;
+
+if ~isfield(O,'tauRiseMin');
+  O.tauRiseMin = 0;
+end;
+if ~isfield(O,'tauDecayMin');
+  O.tauDecayMin = 0;
+end;
+if ~isfield(O,'tauRiseMax');
+  O.tauRiseMax = inf;
+end;
+if ~isfield(O,'tauDecayMax');
+  O.tauDecayMax = inf;
 end;
 
 
@@ -185,7 +201,7 @@ parfor k = 1: O.nNeurons;
     [a(k),b(k),sigma(k), tauRise(k), tauDecay(k), gamma(k), delta(k), eta(k), lambda(k,:),mu(k,:), threshold(k)] = BSD_initialization(Fluorescence(:,k),O,P,k);
 end;
 
-pAlg=P;
+Palg=P;
 %% preallocate memory for spike train estimation.
 
 M   =spdiags([ones(O.sTime,1) ones(O.sTime,1) ones(O.sTime,1)], -2:0,O.sTime,O.sTime); % Initialize memory for the matrix transforming calcium into spikes
@@ -205,7 +221,7 @@ iterations = zeros(O.nNeurons,1);
 
 %% Main File: Pseudo EM Steps.
 
-% for k = 1:O.nNeurons
+%for k = 1:O.nNeurons
 parfor k = 1:O.nNeurons
     conv = (O.iterations==0); % if 0 iterations, no loop
     q = 1;
@@ -218,14 +234,12 @@ parfor k = 1:O.nNeurons
        q = q+1;
        tmpBigLambda = repmat(lambda(k,:)',[O.Time,1]);
        tmpBigMu = repmat(mu(k,:)',[O.Time,1]);
-
        
        [tmpN,~,tmp_cost(q,1)]  = BSD_deconvolution(Fluorescence(:,k),tmpN,b(k)...
             ,gamma(k),delta(k),eta(k),tmpBigLambda,tmpBigMu,O.conditioner, O.slowOptimizer,O.superResolution, I,I1,M,d0,d1,d2);       % update inferred spike train based on estimated parameters
 
        [tmpC,tmp_cost(q,2),b(k),a(k),sigma(k),lambda(k,:),mu(k,:),threshold(k),gamma(k),delta(k),eta(k),tauRise(k),tauDecay(k)] ...
              = BSD_parameter_estimation(tmpN,Fluorescence(:,k),O,tauRise(k),tauDecay(k),b(k),a(k),sigma(k),threshold(k),lambda(k,:));    % update parameters based on previous iteration.         
-        
        if (O.early_stopping == 0) % If cost function does not vary, and early_stoppings =0.
            if (abs((tmp_cost(q,1)-tmp_cost(q-1,1))/tmp_cost(q,1))<O.tol_iter )
                conv =1;
@@ -247,32 +261,32 @@ end;
 
 
 
-pAlg.a=a;
-pAlg.b=b;
-pAlg.sigma=sigma;
-pAlg.gamma=gamma;
-pAlg.delta=delta;
-pAlg.eta=eta;
-pAlg.tauRise=tauRise;
-pAlg.tauDecay=tauDecay;
-pAlg.lambda=lambda;
-pAlg.mu = mu * O.conditioner;
-pAlg.threshold=threshold;
+Palg.a=a;
+Palg.b=b;
+Palg.sigma=sigma;
+Palg.gamma=gamma;
+Palg.delta=delta;
+Palg.eta=eta;
+Palg.tauRise=tauRise;
+Palg.tauDecay=tauDecay;
+Palg.lambda=lambda;
+Palg.mu = mu * O.conditioner;
+Palg.threshold=threshold;
 
 
 O.posts=cost;
 O.iterations = iterations;                        % record of total # of iterations
 
-pPhys=struct;
-pPhys.SNR=pAlg.a./pAlg.sigma;
-pPhys.tauRise=pAlg.tauRise;
-pPhys.tauDecay=pAlg.tauDecay;
-pPhys.lambda=pAlg.lambda;
-pPhys.threshold=pAlg.threshold;
+Pphys=struct;
+Pphys.SNR=Palg.a./Palg.sigma;
+Pphys.tauRise=Palg.tauRise;
+Pphys.tauDecay=Palg.tauDecay;
+Pphys.lambda=Palg.lambda;
+Pphys.threshold=Palg.threshold;
 
 O  = orderfields(O);                   % order fields alphabetically o they are easier to read
-pAlg      = orderfields(pAlg);
-pPhys=orderfields(pPhys);
+Palg      = orderfields(Palg);
+Pphys=orderfields(Pphys);
 
 if siz~=[O.sTime,O.nNeurons]; N=N'; C=C'; end; % Return Spikes and calciumTraces of same size as initial fluorescence.
 
