@@ -19,8 +19,8 @@ load(ground_truth_params);
 datasets = [1,2,4,6,7,8,9,10];  % Values in paper.
 % datasets = [6]; % For test.
 
-SNR_multiplicator = [0.25, 0.5, 1.0]; % Values in paper.
-% SNR_multiplicator = [1.0]; % For test
+% SNR_multiplicator = [0.25, 0.5, 1.0]; % Values in paper.
+SNR_multiplicator = [1.0]; % For test
 
 
 
@@ -143,7 +143,7 @@ end;
 
 save('results_synthetic_dataset_from_SpikeFinder.mat', 'all_tauR_true', 'all_tauD_true', ...
 'all_tauR_inferred', 'all_tauD_inferred', 'all_SNR', 'all_numSpikes', 'all_FiringRate', 'all_Autocorrelation_Width', ...
-'all_dt', 'datasets','SNR_multiplicator','nDatasets','nRepeats','nSNR','all_nNeurons','all_FanoFactor','windowsFanoFactor');
+'all_dt', 'datasets','SNR_multiplicator','nDatasets','nRepeats','nSNR','all_nNeurons');
 
 
 %% Compare inferred parameter values and ground truth values.
@@ -324,7 +324,7 @@ set(gca,'FontSize',25);
 set(gcf,'Color','White');
 savefig('figure_3c.fig');
 export_fig('figure_3c.png','-dpng');
-close;
+% close;
 
 
 %% Figure 3 lower right panel.
@@ -374,6 +374,7 @@ close;
 
 figPosition = [300,300,800,800];
 markerSize = 50;
+
 
 
 figure('Position',figPosition);
